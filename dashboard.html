@@ -343,7 +343,17 @@
                     <button class="proj-filter-btn" data-status="completed" style="padding: 7px 18px; border: 1px solid #ccc; background: #fff; color: #000; border-radius: 4px; margin-right: 6px; cursor: pointer;">Completed</button>
                     <button class="proj-filter-btn" data-status="planning" style="padding: 7px 18px; border: 1px solid #ccc; background: #fff; color: #000; border-radius: 4px; cursor: pointer;">Planning</button>
                 </div>
+                <!-- Project Cards Container -->
                 <div id="projectsCardsContainer" style="display: flex; flex-wrap: wrap; gap: 32px;"></div>
+                <!-- Project Detail View -->
+                <div id="projectDetailView" style="display: none;">
+                    <button id="backToProjectsBtn" style="margin-bottom: 20px; padding: 8px 16px; background: #fff; border: 1px solid #000; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-arrow-left"></i> Back to Projects
+                    </button>
+                    <div id="projectDetailContent" style="background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 24px;">
+                        <!-- Project details will be loaded here -->
+                    </div>
+                </div>
                 <div id="projectsEmpty" style="color: #888; margin-top: 12px; display: none;">No projects found.</div>
             </div>
             <!-- Messages Section -->
@@ -417,6 +427,35 @@
         <div style="display:flex; justify-content:flex-end; gap:8px;">
           <button onclick="closeAddTeamMemberModal()" style="padding:8px 16px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer;">Cancel</button>
           <button onclick="addTeamMember()" style="padding:8px 16px; border-radius:4px; border:none; background:#1976d2; color:#fff; cursor:pointer;">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Task Modal -->
+    <div id="addTaskModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.3); z-index:3001; justify-content:center; align-items:center;">
+        <div style="background:#fff; padding:24px; border-radius:10px; min-width:400px; max-width:90vw; box-shadow:0 2px 16px rgba(0,0,0,0.15);">
+            <h3 style="margin-bottom:16px;">Add New Task</h3>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:8px; font-weight:500;">Task Title</label>
+                <input type="text" id="taskTitleInput" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:8px; font-weight:500;">Description</label>
+                <textarea id="taskDescriptionInput" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; min-height:100px;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:8px; font-weight:500;">Assigned To</label>
+                <select id="taskAssigneeSelect" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <option value="">Select team member...</option>
+                </select>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:8px; font-weight:500;">Due Date</label>
+                <input type="date" id="taskDueDateInput" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button onclick="closeAddTaskModal()" style="padding:8px 16px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer;">Cancel</button>
+                <button onclick="addTask()" style="padding:8px 16px; border-radius:4px; border:none; background:#1976d2; color:#fff; cursor:pointer;">Add Task</button>
         </div>
       </div>
     </div>
@@ -1061,6 +1100,9 @@
                     <div style="font-size: 13px; color: #888; margin-bottom: 6px;">
                         <b>Team Leader:</b> <span style="color: #000; font-weight: 500;">${project.leader || ''}</span>
                     </div>
+                    <div style="font-size: 13px; color: #888; margin-bottom: 6px;">
+                        <b>Your Role:</b> <span style="color: #000; font-weight: 500;">${project.role || 'Team Member'}</span>
+                    </div>
                     <div style="margin-bottom: 8px;">
                         <div style="font-size: 13px; color: #222; margin-bottom: 2px;">Progress</div>
                         <div style="background: #eee; border-radius: 4px; height: 8px; width: 100%;">
@@ -1448,13 +1490,20 @@
             document.getElementById('projectViewModal').style.display = 'none';
         }
         function openProjectViewModal(projectId) {
+            setCurrentProjectId(projectId);
+            document.getElementById('projectsCardsContainer').style.display = 'none';
+            document.getElementById('projectDetailView').style.display = 'block';
+            document.getElementById('projectDetailView').setAttribute('data-project-id', projectId);
+            
             // Fetch project data
             firebase.database().ref('projects/admin-user/' + projectId).once('value').then(snapshot => {
                 const project = snapshot.val();
-                document.getElementById('pvName').textContent = project.name || 'Untitled Project';
+                const detailContent = document.getElementById('projectDetailContent');
+                
                 // Format dates
                 const startDate = project.startDate ? new Date(project.startDate).toLocaleDateString() : 'Not specified';
                 const endDate = project.endDate ? new Date(project.endDate).toLocaleDateString() : 'Not specified';
+                
                 // Format duration
                 let duration = 'Not specified';
                 if (project.startDate && project.endDate) {
@@ -1470,49 +1519,100 @@
                 } else if (project.duration) {
                     duration = project.duration;
                 }
-                // Two-column layout for details (without budget)
-                document.getElementById('pvDetails').innerHTML = `
-                    <div style="display: flex; gap: 32px; flex-wrap: wrap;">
+
+                // Get current user's email
+                let currentUserEmail = '';
+                if (window.firebase && firebase.auth && firebase.auth().currentUser) {
+                    currentUserEmail = firebase.auth().currentUser.email || '';
+                }
+                if (!currentUserEmail) {
+                    currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
+                }
+                
+                // Check if current user is the team leader
+                const isTeamLeader = project.leader && project.leader.toLowerCase().trim() === currentUserEmail.toLowerCase().trim();
+
+                // Build the detail view HTML
+                detailContent.innerHTML = `
+                    <h2 style="margin-bottom: 24px; font-size: 24px;">${project.name || 'Untitled Project'}</h2>
+                    
+                    <div style="display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 32px;">
                         <div style="flex:1; min-width:220px;">
-                            <div style='font-weight: 500; margin-bottom: 8px;'>Project Details</div>
-                            <div style='margin-bottom: 8px;'><b>Description:</b> ${project.description || 'Not specified'}</div>
-                            <div style='margin-bottom: 8px;'><b>Type:</b> ${project.type || 'Not specified'}</div>
-                            <div style='margin-bottom: 8px;'><b>Duration:</b> ${duration}</div>
-                            <div style='margin-bottom: 8px;'><b>Start Date:</b> ${startDate}</div>
-                            <div style='margin-bottom: 8px;'><b>End Date:</b> ${endDate}</div>
+                            <div style='font-weight: 500; margin-bottom: 16px; font-size: 18px;'>Project Details</div>
+                            <div style='margin-bottom: 12px;'><b>Description:</b> ${project.description || 'Not specified'}</div>
+                            <div style='margin-bottom: 12px;'><b>Type:</b> ${project.type || 'Not specified'}</div>
+                            <div style='margin-bottom: 12px;'><b>Duration:</b> ${duration}</div>
+                            <div style='margin-bottom: 12px;'><b>Start Date:</b> ${startDate}</div>
+                            <div style='margin-bottom: 12px;'><b>End Date:</b> ${endDate}</div>
                         </div>
                         <div style="flex:1; min-width:220px;">
-                            <div style='font-weight: 500; margin-bottom: 8px;'>Additional Information</div>
-                            <div style='margin-bottom: 8px;'><b>Location:</b> ${project.location || 'Not specified'}</div>
-                            <div style='margin-bottom: 8px;'><b>Team Leader:</b> ${project.leader || 'Not specified'}</div>
-                            <div style='margin-bottom: 8px;'><b>Status:</b> ${project.status || 'Not specified'}</div>
-                            <div style='margin-bottom: 8px;'><b>Progress:</b> ${project.progress || 0}%</div>
+                            <div style='font-weight: 500; margin-bottom: 16px; font-size: 18px;'>Additional Information</div>
+                            <div style='margin-bottom: 12px;'><b>Location:</b> ${project.location || 'Not specified'}</div>
+                            <div style='margin-bottom: 12px;'><b>Team Leader:</b> ${project.leader || 'Not specified'}</div>
+                            <div style='margin-bottom: 12px;'><b>Status:</b> ${project.status || 'Not specified'}</div>
+                            <div style='margin-bottom: 12px;'><b>Progress:</b> ${project.progress || 0}%</div>
                         </div>
                     </div>
-                `;
-                // Budget section above files, visually prominent and sticky
-                const pvFileSection = document.getElementById('pvFileSection');
-                if (pvFileSection) {
-                    pvFileSection.insertAdjacentHTML('beforebegin', `
-                        <div id="pvBudgetSection" style="position:sticky; top:0; z-index:10; background:#fff; margin-bottom:18px; padding:22px 0 18px 0; border-bottom:2px solid #1976d2; box-shadow:0 2px 8px rgba(25,118,210,0.07);">
-                            <div style="font-size:1.35em; font-weight:700; margin-bottom:10px; color:#1976d2; letter-spacing:0.5px;">Budget: <span id="pvBudgetValue">${project.budget ? '₱' + project.budget : 'Not specified'}</span></div>
-                            <div style="margin-bottom:12px; display:flex; align-items:center; gap:12px;">
-                                <input id="pvBudgetLessenInput" type="number" min="1" placeholder="Amount to lessen" style="padding:10px 14px; font-size:1.1em; border:1.5px solid #1976d2; border-radius:6px; width:160px;">
-                                <button id="pvBudgetLessenBtn" style="padding:10px 22px; font-size:1.1em; border:none; border-radius:6px; background:#d32f2f; color:#fff; font-weight:600; cursor:pointer;">Lessen Budget</button>
-                                <span id="pvBudgetMsg" style="font-size:1em; margin-left:10px;"></span>
+
+                    <div style="background: #f8f9fa; padding: 24px; border-radius: 8px; margin-bottom: 32px;">
+                        <div style="font-size: 20px; font-weight: 700; margin-bottom: 16px; color: #1976d2;">Budget: <span id="pvBudgetValue">${project.budget ? '₱' + project.budget : 'Not specified'}</span></div>
+                        <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+                            <input id="pvBudgetLessenInput" type="number" min="1" placeholder="Amount to lessen" style="padding: 10px 14px; font-size: 16px; border: 1.5px solid #1976d2; border-radius: 6px; width: 200px;">
+                            <button id="pvBudgetLessenBtn" style="padding: 10px 22px; font-size: 16px; border: none; border-radius: 6px; background: #d32f2f; color: #fff; font-weight: 600; cursor: pointer;">Lessen Budget</button>
+                            <span id="pvBudgetMsg" style="font-size: 16px; margin-left: 10px;"></span>
                             </div>
-                            <div id="pvBudgetReportSection" style="margin-top:18px;">
-                                <div style="font-weight:600; margin-bottom:8px; color:#1976d2;">Budget Report</div>
-                                <div style="overflow-x:auto;">
-                                    <canvas id="pvBudgetLineChart" height="90"></canvas>
+                        <div id="pvBudgetReportSection">
+                            <div style="font-weight: 600; margin-bottom: 12px; color: #1976d2;">Budget Report</div>
+                            <div style="overflow-x: auto;">
+                                <canvas id="pvBudgetLineChart" height="120"></canvas>
                                 </div>
-                                <button id="pvBudgetExportBtn" style="margin-top:10px; padding:8px 20px; font-size:1.05em; border:1.5px solid #1976d2; border-radius:6px; background:#fff; color:#1976d2; font-weight:600; cursor:pointer;">Export Report</button>
+                            <button id="pvBudgetExportBtn" style="margin-top: 16px; padding: 8px 20px; font-size: 16px; border: 1.5px solid #1976d2; border-radius: 6px; background: #fff; color: #1976d2; font-weight: 600; cursor: pointer;">Export Report</button>
                             </div>
                         </div>
-                    `);
-                }
-                // Budget lessen logic
-                setTimeout(() => {
+
+                    <div style="margin-bottom: 32px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <div style="font-weight: 500; font-size: 18px;">Team Members</div>
+                            ${isTeamLeader ? `
+                                <button onclick="showAddTeamMemberModal()" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #1976d2; background: #fff; color: #1976d2; cursor: pointer; font-size: 14px;">Add Member</button>
+                            ` : ''}
+                        </div>
+                        <div id="pvTeamList" style="font-size: 16px;"></div>
+                    </div>
+
+                    <div style="margin-bottom: 32px;">
+                        <div style="font-weight: 500; font-size: 18px; margin-bottom: 16px;">Files</div>
+                        <div style="margin-bottom: 16px;">
+                            <input type="file" id="pvFileInput" style="margin-right: 8px;">
+                            <button id="pvUploadBtn" style="padding: 8px 16px; border-radius: 4px; border: none; background: #1976d2; color: #fff; cursor: pointer;">Upload</button>
+                            <span id="pvUploadStatus" style="font-size: 14px; margin-left: 8px;"></span>
+                        </div>
+                        <div id="pvFilesList"></div>
+                    </div>
+
+                    ${isTeamLeader ? `
+                    <div style="margin-bottom: 32px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <div style="font-weight: 500; font-size: 18px;">Tasks</div>
+                            <button onclick="showAddTaskModal()" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #1976d2; background: #fff; color: #1976d2; cursor: pointer; font-size: 14px;">Add Task</button>
+                        </div>
+                        <div id="pvTasksList" style="font-size: 16px;"></div>
+                    </div>
+                    ` : ''}
+                `;
+
+                // Add back button functionality
+                document.getElementById('backToProjectsBtn').onclick = function() {
+                    document.getElementById('projectDetailView').style.display = 'none';
+                    document.getElementById('projectsCardsContainer').style.display = 'flex';
+                };
+
+                // Initialize all the functionality
+                loadTeamMembers(projectId);
+                showProjectFiles(projectId);
+                loadBudgetLineChart(projectId);
+
+                // Set up budget lessen functionality
                     const lessenBtn = document.getElementById('pvBudgetLessenBtn');
                     const msg = document.getElementById('pvBudgetMsg');
                     if (lessenBtn) {
@@ -1550,57 +1650,22 @@
                                 project.budget = newBudget;
                             });
                         };
-                    }
-                    // Load budget chart
-                    loadBudgetLineChart(projectId);
-                    // Export button
-                    const exportBtn = document.getElementById('pvBudgetExportBtn');
-                    if (exportBtn) {
-                        exportBtn.onclick = function() {
-                            exportBudgetReport(projectId);
-                        };
-                    }
-                }, 300);
-                // Make modal body scrollable if content overflows
-                const modalBody = document.querySelector('#projectViewModal > div');
-                if (modalBody) {
-                    modalBody.style.maxHeight = '90vh';
-                    modalBody.style.overflowY = 'auto';
                 }
-                
-                // Store project ID for team member functions
-                document.getElementById('projectViewModal').setAttribute('data-project-id', projectId);
-                
-                // Get current user's email
-                let currentUserEmail = '';
-                if (window.firebase && firebase.auth && firebase.auth().currentUser) {
-                    currentUserEmail = firebase.auth().currentUser.email || '';
-                }
-                if (!currentUserEmail) {
-                    currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
-                }
-                
-                // Check if current user is the team leader
-                const isTeamLeader = project.leader && project.leader.toLowerCase().trim() === currentUserEmail.toLowerCase().trim();
-                
-                // Show/hide Add Member button based on team leader status
-                const addMemberBtn = document.querySelector('#pvTeamSection button');
-                if (addMemberBtn) {
-                    addMemberBtn.style.display = isTeamLeader ? 'block' : 'none';
-                }
-                
-                document.getElementById('projectViewModal').style.display = 'flex';
-                
-                // Load team members
-                loadTeamMembers(projectId);
-                
-                // Show files
-                showProjectFiles(projectId);
-                
-                // Set upload handler
+
+                // Set up file upload functionality
                 document.getElementById('pvUploadBtn').onclick = function() {
                     uploadProjectFile(projectId);
                 };
+
+                // Set up export button
+                document.getElementById('pvBudgetExportBtn').onclick = function() {
+                    exportBudgetReport(projectId);
+                };
+
+                // Add this line after setting up other functionality
+                if (isTeamLeader) {
+                    loadTasks(projectId);
+                }
             });
         }
         // File upload logic
@@ -1664,15 +1729,28 @@
         function showAddTeamMemberModal() {
           const modal = document.getElementById('addTeamMemberModal');
           const select = document.getElementById('teamMemberSelect');
-          
-          // Clear existing options
           select.innerHTML = '<option value="">Select a team member...</option>';
-          
-          // Fetch users from Firebase
-          firebase.database().ref('users').once('value').then(snapshot => {
+            const projectId = getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
+            firebase.database().ref('projects/admin-user/' + projectId).once('value').then(projectSnap => {
+                const project = projectSnap.val();
+                const leaderEmail = project.leader ? project.leader.toLowerCase() : '';
+                firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers').once('value')
+                    .then(teamSnapshot => {
+                        const existingMembers = new Set();
+                        teamSnapshot.forEach(memberSnap => {
+                            const member = memberSnap.val();
+                            if (member && member.email) {
+                                existingMembers.add(member.email.toLowerCase());
+                            }
+                        });
+                        return firebase.database().ref('users').once('value').then(snapshot => {
             snapshot.forEach(childSnap => {
               const user = childSnap.val();
-              if (user && user.email) {
+                                if (
+                                    user && user.email &&
+                                    !existingMembers.has(user.email.toLowerCase()) &&
+                                    user.email.toLowerCase() !== leaderEmail
+                                ) {
                 const option = document.createElement('option');
                 option.value = user.email;
                 option.textContent = user.email + (user.name ? ' (' + user.name + ')' : '');
@@ -1680,34 +1758,55 @@
               }
             });
           });
-          
+                    });
+            });
           modal.style.display = 'flex';
-        }
-
-        function closeAddTeamMemberModal() {
-          document.getElementById('addTeamMemberModal').style.display = 'none';
         }
 
         function addTeamMember() {
           const select = document.getElementById('teamMemberSelect');
           const selectedEmail = select.value;
-          
           if (!selectedEmail) {
             alert('Please select a team member');
             return;
           }
-          
-          const currentProjectId = document.getElementById('projectViewModal').getAttribute('data-project-id');
-          
-          
-          // Add member to project's team members list
-          firebase.database().ref('projects/admin-user/' + currentProjectId + '/teamMembers').push({
+            const projectId = getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
+            firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers').once('value')
+                .then(teamSnapshot => {
+                    let alreadyExists = false;
+                    teamSnapshot.forEach(memberSnap => {
+                        const member = memberSnap.val();
+                        if (member && member.email && member.email.toLowerCase() === selectedEmail.toLowerCase()) {
+                            alreadyExists = true;
+                        }
+                    });
+                    if (alreadyExists) {
+                        alert('This member is already in the team.');
+                        return;
+                    }
+                    return firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers').push({
             email: selectedEmail,
             addedAt: Date.now()
           }).then(() => {
             closeAddTeamMemberModal();
-            loadTeamMembers(currentProjectId);
-          });
+                        loadTeamMembers(projectId);
+                        firebase.database().ref('users').orderByChild('email').equalTo(selectedEmail).once('value')
+                            .then(snapshot => {
+                                if (snapshot.exists()) {
+                                    const userKey = Object.keys(snapshot.val())[0];
+                                    return firebase.database().ref('users/' + userKey + '/teamProjects').push({
+                                        projectId: projectId,
+                                        role: 'Team Member',
+                                        addedAt: Date.now()
+                                    });
+                                }
+                            });
+                    });
+                });
+        }
+
+        function closeAddTeamMemberModal() {
+          document.getElementById('addTeamMemberModal').style.display = 'none';
         }
 
         function removeTeamMember(projectId, memberId) {
@@ -1719,24 +1818,20 @@
           if (!currentUserEmail) {
               currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
           }
-          
           // Check if current user is the team leader
           firebase.database().ref('projects/admin-user/' + projectId).once('value')
               .then(snapshot => {
                   const project = snapshot.val();
                   const isTeamLeader = project.leader && project.leader.toLowerCase().trim() === currentUserEmail.toLowerCase().trim();
-                  
                   if (!isTeamLeader) {
                       alert('Only the team leader can remove team members.');
                       return;
                   }
-                  
                   if (confirm('Are you sure you want to remove this team member?')) {
                       // Get the member's email before removing
                       return firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers/' + memberId).once('value')
                           .then(memberSnapshot => {
                               const memberEmail = memberSnapshot.val().email;
-                              
                               // Remove from project's team members
                               return firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers/' + memberId).remove()
                                   .then(() => {
@@ -1767,10 +1862,9 @@
         }
 
         function loadTeamMembers(projectId) {
+            projectId = projectId || getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
           const teamListDiv = document.getElementById('pvTeamList');
           teamListDiv.innerHTML = 'Loading team members...';
-          
-          // Get current user's email
           let currentUserEmail = '';
           if (window.firebase && firebase.auth && firebase.auth().currentUser) {
               currentUserEmail = firebase.auth().currentUser.email || '';
@@ -1778,32 +1872,34 @@
           if (!currentUserEmail) {
               currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
           }
-          
           firebase.database().ref('projects/admin-user/' + projectId).once('value')
             .then(snapshot => {
               const project = snapshot.val();
               const isTeamLeader = project.leader && project.leader.toLowerCase().trim() === currentUserEmail.toLowerCase().trim();
-              
+                    const leaderEmail = project.leader ? project.leader.toLowerCase() : '';
               return firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers').once('value')
                   .then(membersSnapshot => {
                       if (!membersSnapshot.exists()) {
                           teamListDiv.innerHTML = 'No team members yet.';
                           return;
                       }
-                      
+                            const uniqueEmails = new Set();
                       let html = '<ul style="margin:0; padding-left:18px;">';
                       membersSnapshot.forEach(memberSnap => {
                         const member = memberSnap.val();
+                                if (member && member.email && !uniqueEmails.has(member.email.toLowerCase())) {
+                                    uniqueEmails.add(member.email.toLowerCase());
                         html += `
                           <li style="margin-bottom:4px;">
                             ${member.email}
-                            ${isTeamLeader ? `
-                                <button onclick="removeTeamMember('${projectId}', '${memberSnap.key}')" 
-                                        style="margin-left:8px; padding:2px 8px; border-radius:4px; border:1px solid #d32f2f; background:#fff; color:#d32f2f; cursor:pointer; font-size:12px;">
+                                            ${isTeamLeader && member.email.toLowerCase() !== leaderEmail ? `
+                                                <button onclick=\"removeTeamMember('${projectId}', '${memberSnap.key}')\" 
+                                                        style=\"margin-left:8px; padding:2px 8px; border-radius:4px; border:1px solid #d32f2f; background:#fff; color:#d32f2f; cursor:pointer; font-size:12px;\">
                                     Remove
                                 </button>
                             ` : ''}
                           </li>`;
+                                }
                       });
                       html += '</ul>';
                       teamListDiv.innerHTML = html;
@@ -1876,6 +1972,204 @@
                 URL.revokeObjectURL(url);
             });
         }
+
+        // Add these new functions for task management
+        function showAddTaskModal() {
+            const modal = document.getElementById('addTaskModal');
+            const select = document.getElementById('taskAssigneeSelect');
+            select.innerHTML = '<option value="">Select team member...</option>';
+            // Get current project ID
+            const projectId = getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
+            // Fetch team members for this project (use exact emails as stored in DB)
+            firebase.database().ref('projects/admin-user/' + projectId + '/teamMembers').once('value').then(snapshot => {
+                snapshot.forEach(memberSnap => {
+                    const member = memberSnap.val();
+                    if (member && member.email) {
+                        // Use the exact email as stored in DB
+                        const email = member.email.trim().toLowerCase();
+                        const option = document.createElement('option');
+                        option.value = email;
+                        option.textContent = email;
+                        select.appendChild(option);
+                    }
+                });
+            });
+            modal.style.display = 'flex';
+        }
+
+        function closeAddTaskModal() {
+            document.getElementById('addTaskModal').style.display = 'none';
+        }
+
+        function addTask() {
+            const title = document.getElementById('taskTitleInput').value;
+            const description = document.getElementById('taskDescriptionInput').value;
+            let assignee = document.getElementById('taskAssigneeSelect').value;
+            const dueDate = document.getElementById('taskDueDateInput').value;
+            if (!title || !assignee || !dueDate) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            const projectId = getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
+            // Always save assignee as trimmed and lowercased from the dropdown (which is already correct)
+            assignee = assignee.trim().toLowerCase();
+            // Store the task under /projects/admin-user/{projectId}/tasks/
+            firebase.database().ref('projects/admin-user/' + projectId + '/tasks').push({
+                title: title,
+                description: description,
+                assignee: assignee,
+                dueDate: dueDate,
+                status: 'pending',
+                createdAt: Date.now()
+            }).then(() => {
+                closeAddTaskModal();
+                loadTasks(projectId);
+                document.getElementById('taskTitleInput').value = '';
+                document.getElementById('taskDescriptionInput').value = '';
+                document.getElementById('taskAssigneeSelect').value = '';
+                document.getElementById('taskDueDateInput').value = '';
+            });
+        }
+
+        function fetchAndLogTasks(projectId, currentUserEmail) {
+            firebase.database().ref('projects/admin-user/' + projectId + '/tasks').once('value').then(snapshot => {
+                console.log('--- All tasks in Firebase for project', projectId, '---');
+                snapshot.forEach(taskSnap => {
+                    const task = taskSnap.val();
+                    console.log('Task:', task, 'Assignee:', (task.assignee || '').trim().toLowerCase(), 'CurrentUser:', currentUserEmail);
+                });
+            });
+        }
+
+        function loadTasks(projectId) {
+            // Always fetch tasks from /projects/admin-user/{projectId}/tasks/
+            projectId = projectId || getCurrentProjectId() || document.getElementById('projectDetailView').getAttribute('data-project-id');
+            const tasksListDiv = document.getElementById('pvTasksList');
+            tasksListDiv.innerHTML = 'Loading tasks...';
+            let currentUserEmail = '';
+            if (window.firebase && firebase.auth && firebase.auth().currentUser) {
+                currentUserEmail = firebase.auth().currentUser.email || '';
+            }
+            if (!currentUserEmail) {
+                currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
+            }
+            currentUserEmail = currentUserEmail.trim().toLowerCase();
+            fetchAndLogTasks(projectId, currentUserEmail); // Debug: log all tasks and user
+            let isTeamLeader = false;
+            firebase.database().ref('projects/admin-user/' + projectId).once('value').then(projectSnap => {
+                const project = projectSnap.val();
+                if (project && project.leader && project.leader.trim().toLowerCase() === currentUserEmail) {
+                    isTeamLeader = true;
+                }
+                firebase.database().ref('projects/admin-user/' + projectId + '/tasks').once('value').then(snapshot => {
+                    if (!snapshot.exists()) {
+                        tasksListDiv.innerHTML = 'No tasks yet.';
+                        return;
+                    }
+                    let html = '<div style="display: grid; gap: 16px;">';
+                    let hasTasks = false;
+                    snapshot.forEach(taskSnap => {
+                        const task = taskSnap.val();
+                        const assigneeEmail = (task.assignee || '').trim().toLowerCase();
+                        hasTasks = true;
+                        const dueDate = new Date(task.dueDate);
+                        const isOverdue = dueDate < new Date() && task.status !== 'completed';
+                        const isAssignedToCurrentUser = assigneeEmail === currentUserEmail;
+                        html += `
+                            <div style=\"background: #f8f9fa; border-radius: 8px; padding: 16px; border: 1px solid #ddd;\">
+                                <div style=\"display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;\">
+                                    <div style=\"font-weight: 600; font-size: 16px;\">${task.title}</div>
+                                    <div style=\"display: flex; gap: 8px; align-items: center;\">
+                                        ${isAssignedToCurrentUser && task.status !== 'completed' ? `
+                                            <button onclick=\"updateTaskStatus('${projectId}', '${taskSnap.key}', 'completed')\" 
+                                                    style=\"padding: 4px 12px; border-radius: 4px; border: none; background: #388e3c; color: #fff; cursor: pointer; font-size: 14px;\">
+                                                Mark as Done
+                                            </button>
+                                        ` : ''}
+                                        ${isTeamLeader ? `
+                                            <button onclick=\"deleteTask('${projectId}', '${taskSnap.key}')\" 
+                                                    style=\"padding: 4px 12px; border-radius: 4px; border: none; background: #d32f2f; color: #fff; cursor: pointer; font-size: 14px;\">
+                                                Delete
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div style=\"color: #666; margin-bottom: 8px;\">${task.description || 'No description'}</div>
+                                <div style=\"display: flex; justify-content: space-between; align-items: center; font-size: 14px;\">
+                                    <div>
+                                        <span style=\"color: #666;\">Assigned to: </span>
+                                        <span style=\"font-weight: 500;\">${task.assignee}</span>
+                                    </div>
+                                    <div style=\"color: ${isOverdue ? '#d32f2f' : '#666'}\">
+                                        Due: ${dueDate.toLocaleDateString()}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    tasksListDiv.innerHTML = hasTasks ? html : 'No tasks for this project.';
+                });
+            });
+        }
+
+        function deleteTask(projectId, taskId) {
+            if (confirm('Are you sure you want to delete this task?')) {
+                firebase.database().ref('projects/admin-user/' + projectId + '/tasks/' + taskId).remove()
+                    .then(() => {
+                        loadTasks(projectId);
+                    });
+            }
+        }
+
+        function updateTaskStatus(projectId, taskId, newStatus) {
+            // Get current user's email
+            let currentUserEmail = '';
+            if (window.firebase && firebase.auth && firebase.auth().currentUser) {
+                currentUserEmail = firebase.auth().currentUser.email || '';
+            }
+            if (!currentUserEmail) {
+                currentUserEmail = localStorage.getItem('tempEmail') || localStorage.getItem('userEmail') || '';
+            }
+            
+            // Check if user is authorized to update this task
+            firebase.database().ref('projects/admin-user/' + projectId + '/tasks/' + taskId).once('value')
+                .then(snapshot => {
+                    const task = snapshot.val();
+                    const isAssignedToCurrentUser = task.assignee.toLowerCase() === currentUserEmail.toLowerCase();
+                    
+                    // Only allow updates if user is assigned to the task or is the team leader
+                    if (isAssignedToCurrentUser || isTeamLeader) {
+                        return firebase.database().ref('projects/admin-user/' + projectId + '/tasks/' + taskId + '/status').set(newStatus);
+                    } else {
+                        alert('You are not authorized to update this task.');
+                    }
+                })
+                .then(() => {
+                    if (newStatus) {
+                        loadTasks(projectId);
+                    }
+                });
+        }
+
+        // Helper: Store and retrieve current projectId for detail view
+        function setCurrentProjectId(projectId) {
+            localStorage.setItem('currentProjectId', projectId);
+        }
+        function getCurrentProjectId() {
+            return localStorage.getItem('currentProjectId');
+        }
+
+        // On page load, if project detail view is open, reload its data
+        window.addEventListener('DOMContentLoaded', function() {
+            const projectDetailView = document.getElementById('projectDetailView');
+            if (projectDetailView && projectDetailView.style.display !== 'none') {
+                const projectId = getCurrentProjectId();
+                if (projectId) {
+                    openProjectViewModal(projectId);
+                }
+            }
+        });
     </script>
 </body>
 </html>
