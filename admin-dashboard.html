@@ -575,6 +575,13 @@
                     <div style="margin-bottom: 16px;">
                         <div style="font-weight: 500; margin-bottom: 8px;">Budget</div>
                         <div id="pfv-budget" style="color: #666;">Project budget</div>
+                        <div id="addBudgetSection" style="display: none; margin-top: 8px;">
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="number" id="newBudgetInput" placeholder="Enter additional budget" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 150px;">
+                                <button onclick="addNewBudget()" style="padding: 8px 16px; background: #000; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Add Budget</button>
+                            </div>
+                            <div id="addBudgetMsg" class="budget-message" style="font-size: 13px; margin-top: 4px;"></div>
+                        </div>
                     </div>
                     <div style="margin-bottom: 16px;">
                         <div style="font-weight: 500; margin-bottom: 8px;">Location</div>
@@ -1874,6 +1881,22 @@
             
             // Show modal
             modal.style.display = 'flex';
+            
+            // Create unique message element for this project
+            const addBudgetSection = document.getElementById('addBudgetSection');
+            const existingMsg = addBudgetSection.querySelector('.budget-message');
+            if (existingMsg) {
+                existingMsg.remove();
+            }
+            const msgDiv = document.createElement('div');
+            msgDiv.id = `budgetMsg_${project._id}`;
+            msgDiv.className = 'budget-message';
+            msgDiv.style.fontSize = '13px';
+            msgDiv.style.marginTop = '4px';
+            addBudgetSection.appendChild(msgDiv);
+            
+            // Always show add budget section for all users
+            addBudgetSection.style.display = 'block';
         }
 
         // Function to load team members
@@ -2445,6 +2468,82 @@
                 .catch(error => {
                     console.error('Error loading team leaders:', error);
                 });
+        }
+
+        // Modify the addNewBudget function to work for all users
+        function addNewBudget() {
+            const projectId = document.getElementById('projectFullViewModal').getAttribute('data-project-id');
+            const newBudgetInput = document.getElementById('newBudgetInput');
+            const addBudgetMsg = document.getElementById(`budgetMsg_${projectId}`);
+            const additionalBudget = parseFloat(newBudgetInput.value);
+
+            if (isNaN(additionalBudget) || additionalBudget <= 0) {
+                addBudgetMsg.textContent = 'Please enter a valid budget amount.';
+                addBudgetMsg.style.color = '#d32f2f';
+                return;
+            }
+
+            // Get current user's email
+            const currentUserEmail = document.getElementById('sidebarUserEmail').textContent;
+            
+            // Get current budget from display
+            const currentBudgetText = document.getElementById('pfv-budget').textContent;
+            const currentBudget = parseFloat(currentBudgetText.replace('₱', '')) || 0;
+            const newTotalBudget = currentBudget + additionalBudget;
+
+            // Get user key for the current user
+            getUserKeyByEmail(currentUserEmail, function(userKey) {
+                if (!userKey) {
+                    addBudgetMsg.textContent = 'Error: User not found.';
+                    addBudgetMsg.style.color = '#d32f2f';
+                    return;
+                }
+
+                // Update budget in Firebase
+                const projectRef = firebase.database().ref(`projects/${userKey}/${projectId}`);
+                
+                // First get the current project data
+                projectRef.once('value')
+                    .then((snapshot) => {
+                        const projectData = snapshot.val();
+                        if (!projectData) {
+                            throw new Error('Project not found');
+                        }
+
+                        // Update the budget
+                        return projectRef.update({
+                            budget: newTotalBudget,
+                            lastUpdated: firebase.database.ServerValue.TIMESTAMP
+                        });
+                    })
+                    .then(() => {
+                        // Update display in the modal
+                        document.getElementById('pfv-budget').textContent = '₱' + newTotalBudget;
+                        newBudgetInput.value = '';
+                        addBudgetMsg.textContent = `Added ₱${additionalBudget} to budget. New total: ₱${newTotalBudget}`;
+                        addBudgetMsg.style.color = '#388e3c';
+                        
+                        // Add to budget history
+                        const now = Date.now();
+                        firebase.database().ref(`projects/${userKey}/${projectId}/budgetHistory`).push({
+                            date: now,
+                            value: newTotalBudget,
+                            added: additionalBudget,
+                            addedBy: currentUserEmail
+                        });
+
+                        // Refresh the project cards to show updated budget
+                        const email = document.getElementById('sidebarUserEmail').textContent;
+                        getUserKeyByEmail(email, function(userKey) {
+                            fetchAndRenderProjects(userKey);
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error updating budget:', error);
+                        addBudgetMsg.textContent = 'Error updating budget. Please try again.';
+                        addBudgetMsg.style.color = '#d32f2f';
+                    });
+            });
         }
     </script>
 </body>
